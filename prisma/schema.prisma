@@ -1,0 +1,538 @@
+// ============================================================
+// AdGame Pro — Prisma Schema (PostgreSQL)
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  user
+  advertiser
+  partner
+  admin
+}
+
+enum GameStatus {
+  draft
+  pending
+  active
+  ended
+  rejected
+}
+
+enum GameType {
+  qr_code
+  quiz
+  lucky_draw
+  wheel
+  scratch
+  memory
+  vote
+  photo
+  treasure_hunt
+  advent
+}
+
+enum ParticipationFrequency {
+  once
+  daily
+  unlimited
+}
+
+enum WinCondition {
+  random
+  first
+  score
+}
+
+enum ParticipationStatus {
+  pending
+  won
+  lost
+}
+
+enum AdStatus {
+  draft
+  pending
+  approved
+  rejected
+}
+
+enum AdType {
+  ai
+  template
+  upload
+}
+
+enum OfferType {
+  percentage
+  fixed
+  buy_one_get_one
+  gift
+}
+
+enum ValidationStatus {
+  pending
+  approved
+  rejected
+}
+
+enum BoxStatus {
+  active
+  offline
+  maintenance
+  blocked
+}
+
+enum ReservationStatus {
+  pending
+  confirmed
+  cancelled
+}
+
+enum SubscriptionStatus {
+  active
+  suspended
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+  refunded
+}
+
+enum NotificationType {
+  game
+  offer
+  system
+  message
+  validation
+}
+
+// ─── MODELS ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(user)
+  phone        String?
+  isValidated  Boolean  @default(true)
+  isBlocked    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  sessions          Session[]
+  resetTokens       PasswordResetToken[]
+  advertiserProfile AdvertiserProfile?
+  partner           Partner?
+  games             Game[]
+  ads               Ad[]
+  participations    Participation[]
+  offers            Offer[]
+  messagesFrom      Message[]         @relation("MessageFrom")
+  messagesTo        Message[]         @relation("MessageTo")
+  notifications     Notification[]
+  reservationsUser  Reservation[]     @relation("ReservationUser")
+  subscription      Subscription?
+  validatedProfiles AdvertiserProfile[] @relation("ValidatedBy")
+  paymentTransactions PaymentTransaction[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id
+  userId    Int
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String   @id
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model AdvertiserProfile {
+  id               Int              @id @default(autoincrement())
+  userId           Int              @unique
+  businessName     String
+  businessType     String           @default("")
+  address          String           @default("")
+  city             String           @default("")
+  lat              Float?
+  lng              Float?
+  phone            String           @default("")
+  website          String?
+  facebook         String?
+  instagram        String?
+  tiktok           String?
+  openingHours     String?          // JSON string
+  priceRange       String?
+  description      String?
+  photos           String[]         @default([])
+  coverPhoto       String?
+  openaiKey        String?
+  validationStatus ValidationStatus @default(pending)
+  validatedById    Int?
+  validatedAt      DateTime?
+  rejectionReason  String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user        User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  validatedBy User? @relation("ValidatedBy", fields: [validatedById], references: [id])
+
+  @@map("advertiser_profiles")
+}
+
+model City {
+  id           Int     @id @default(autoincrement())
+  name         String  @unique
+  country      String  @default("TN")
+  isForeignCity Boolean @default(false)
+
+  boxes       Box[]
+  fluxCities  BroadcastFluxCity[]
+  gameCities  GameCity[]
+
+  @@map("cities")
+}
+
+model Game {
+  id                     Int                    @id @default(autoincrement())
+  title                  String
+  description            String                 @default("")
+  type                   GameType               @default(qr_code)
+  status                 GameStatus             @default(pending)
+  advertiserId           Int
+  startDate              DateTime
+  endDate                DateTime
+  maxParticipations      Int                    @default(1000)
+  participationFrequency ParticipationFrequency @default(once)
+  winCondition           WinCondition           @default(random)
+  lots                   Json                   @default("[]")
+  associatedAdId         Int?
+  displayFrequency       String                 @default("30min")
+  totalParticipations    Int                    @default(0)
+  qrCodeUrl              String?
+  wheelConfig            Json?
+  videoUrl               String?
+  rejectionReason        String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  advertiser     User             @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  associatedAd   Ad?              @relation(fields: [associatedAdId], references: [id])
+  participations Participation[]
+  gameCities     GameCity[]
+  fluxGames      BroadcastFluxGame[]
+
+  @@index([advertiserId])
+  @@index([status])
+  @@index([status, endDate])
+  @@map("games")
+}
+
+model GameCity {
+  gameId Int
+  cityId Int
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@id([gameId, cityId])
+  @@map("game_cities")
+}
+
+model Ad {
+  id              Int       @id @default(autoincrement())
+  title           String
+  description     String    @default("")
+  advertiserId    Int
+  status          AdStatus  @default(pending)
+  type            AdType    @default(ai)
+  videoUrl        String?
+  fileSize        Int?
+  duration        Int       @default(30)
+  aiScore         Float?
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  advertiser  User                @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  gamesLinked Game[]
+  fluxAds     BroadcastFluxAd[]
+
+  @@index([advertiserId])
+  @@index([status])
+  @@map("ads")
+}
+
+model Participation {
+  id                  Int                 @id @default(autoincrement())
+  userId              Int
+  gameId              Int
+  status              ParticipationStatus @default(pending)
+  participationNumber String              @unique
+  lotWon              String?
+  qrScreenshot        String?
+  createdAt           DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  // Prevents race-condition double participation at DB level
+  @@unique([userId, gameId], name: "unique_user_game_once")
+  @@index([gameId])
+  @@index([userId])
+  @@map("participations")
+}
+
+model Offer {
+  id           Int       @id @default(autoincrement())
+  advertiserId Int
+  title        String
+  description  String?
+  conditions   String?
+  type         OfferType @default(percentage)
+  discount     Float     @default(0)
+  promoCode    String    @unique
+  badgeText    String?
+  startDate    DateTime
+  endDate      DateTime
+  usageCount   Int       @default(0)
+  usageLimit   Int?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  advertiser User @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+
+  @@index([advertiserId])
+  @@index([isActive, endDate])
+  @@map("offers")
+}
+
+model Partner {
+  id          Int     @id @default(autoincrement())
+  userId      Int     @unique
+  businessName String
+  address     String  @default("")
+  city        String  @default("")
+  lat         Float   @default(36.8190)
+  lng         Float   @default(10.1658)
+  category    String  @default("")
+  phone       String  @default("")
+  rating      Float   @default(5.0)
+  reviewCount Int     @default(0)
+  isActive    Boolean @default(true)
+  isOpen      Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boxes        Box[]
+  reservations Reservation[]
+
+  @@map("partners")
+}
+
+model Box {
+  id             Int       @id @default(autoincrement())
+  name           String
+  ipAddress      String    @unique
+  cityId         Int
+  partnerId      Int?
+  isOnline       Boolean   @default(false)
+  status         BoxStatus @default(active)
+  assignedFluxId Int?
+  lastSeen       DateTime  @default(now())
+  lastPing       DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  city         City            @relation(fields: [cityId], references: [id])
+  partner      Partner?        @relation(fields: [partnerId], references: [id])
+  assignedFlux BroadcastFlux?  @relation(fields: [assignedFluxId], references: [id])
+  messages     Message[]
+
+  @@map("boxes")
+}
+
+model BroadcastFlux {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  streamUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  boxes     Box[]
+  fluxCities BroadcastFluxCity[]
+  fluxAds    BroadcastFluxAd[]
+  fluxGames  BroadcastFluxGame[]
+
+  @@map("broadcast_fluxes")
+}
+
+model BroadcastFluxCity {
+  fluxId Int
+  cityId Int
+
+  flux BroadcastFlux @relation(fields: [fluxId], references: [id], onDelete: Cascade)
+  city City          @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@id([fluxId, cityId])
+  @@map("broadcast_flux_cities")
+}
+
+model BroadcastFluxAd {
+  fluxId Int
+  adId   Int
+  order  Int @default(0)
+
+  flux BroadcastFlux @relation(fields: [fluxId], references: [id], onDelete: Cascade)
+  ad   Ad            @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@id([fluxId, adId])
+  @@map("broadcast_flux_ads")
+}
+
+model BroadcastFluxGame {
+  fluxId Int
+  gameId Int
+
+  flux BroadcastFlux @relation(fields: [fluxId], references: [id], onDelete: Cascade)
+  game Game          @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@id([fluxId, gameId])
+  @@map("broadcast_flux_games")
+}
+
+model Message {
+  id               Int      @id @default(autoincrement())
+  fromUserId       Int
+  toUserId         Int?
+  boxId            Int?
+  content          String
+  isRead           Boolean  @default(false)
+  isAdminBroadcast Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  fromUser User     @relation("MessageFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User?    @relation("MessageTo", fields: [toUserId], references: [id], onDelete: SetNull)
+  box      Box?     @relation(fields: [boxId], references: [id], onDelete: SetNull)
+
+  @@index([fromUserId])
+  @@index([toUserId, isRead])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model Reservation {
+  id        Int               @id @default(autoincrement())
+  userId    Int
+  partnerId Int
+  service   String
+  price     Float
+  duration  Int
+  date      DateTime
+  status    ReservationStatus @default(pending)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user    User    @relation("ReservationUser", fields: [userId], references: [id], onDelete: Cascade)
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([partnerId, date])
+  @@map("reservations")
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  title     String
+  message   String
+  type      NotificationType @default(system)
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId])
+  @@map("notifications")
+}
+
+model Subscription {
+  id              Int                @id @default(autoincrement())
+  userId          Int                @unique
+  planId          String
+  planName        String
+  amount          Float
+  status          SubscriptionStatus @default(active)
+  startDate       DateTime           @default(now())
+  nextBillingDate DateTime
+  paidAt          DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions PaymentTransaction[]
+
+  @@map("subscriptions")
+}
+
+// ─── PAYMENT TRANSACTIONS (Flouci) ────────────────────────────────────────────
+
+model PaymentTransaction {
+  id             Int           @id @default(autoincrement())
+  userId         Int
+  subscriptionId Int?
+  planId         String
+  amount         Float
+  currency       String        @default("TND")
+  status         PaymentStatus @default(pending)
+  // Flouci fields
+  flouciPaymentId   String?    @unique  // payment_id returned by Flouci
+  flouciPayUrl      String?             // checkout URL sent to user
+  flouciReceiptId   String?    @unique  // receipt after successful payment
+  failureReason     String?
+  paidAt            DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@index([flouciPaymentId])
+  @@index([status])
+  @@map("payment_transactions")
+}
